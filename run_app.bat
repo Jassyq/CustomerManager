@@ -94,8 +94,11 @@ if %PACKAGES_MISSING% gtr 0 (
     echo This may take 1-2 minutes on first run...
     echo.
     
-    python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt
+    echo Upgrading pip to latest version...
+    python -m pip install --upgrade pip setuptools wheel
+    echo.
+    echo Installing packages - this may take 2-3 minutes...
+    python -m pip install -r requirements.txt --no-build-isolation
     
     if errorlevel 1 (
         echo.

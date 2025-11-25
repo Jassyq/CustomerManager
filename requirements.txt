@@ -1,11 +1,12 @@
 # Customer Price Manager v4.0 - Required Python Packages
 # Install these packages with: pip install -r requirements.txt
 
-# Core dependencies
-streamlit>=1.28.0,<2.0.0
-openpyxl>=3.1.2,<4.0.0
-pandas>=2.0.0,<3.0.0
+# Core dependencies - stable versions without build issues
+streamlit==1.28.1
+openpyxl==3.10.10
+pandas==2.0.3
 
+# No pyarrow - not needed and causes build failures on new computers
 # Optional but recommended for better performance
-xlrd>=2.0.1  # For reading older .xls files
-Pillow>=10.0.0  # For image handling in Streamlit
+xlrd==2.0.1
+Pillow==10.0.0
