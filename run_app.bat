@@ -2,6 +2,13 @@
 title Customer Price Manager v4.0 - Memory + Export Edition
 color 0A
 
+REM ============================================================
+REM CRITICAL: Change to the batch file's own directory
+REM ============================================================
+cd /d "%~dp0"
+echo Current working directory: %CD%
+echo.
+
 echo ════════════════════════════════════════════════════════
 echo   Customer Price Manager v4.0
 echo   Memory-Based + Clean Export Edition
@@ -94,11 +101,8 @@ if %PACKAGES_MISSING% gtr 0 (
     echo This may take 1-2 minutes on first run...
     echo.
     
-    echo Upgrading pip to latest version...
-    python -m pip install --upgrade pip setuptools wheel
-    echo.
-    echo Installing packages - this may take 2-3 minutes...
-    python -m pip install -r requirements.txt --no-build-isolation
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
     
     if errorlevel 1 (
         echo.
@@ -127,20 +131,33 @@ REM ============================================================
 REM STEP 4: Locate and Verify App File
 REM ============================================================
 echo [Step 4/4] Locating application file...
+echo.
 
+REM Check if app.py exists in current directory
 if exist "app.py" (
+    echo ✓ Found: app.py in current directory
     set APP_FILE=app.py
-    echo ✓ Found: app.py
-) else (
-    echo ❌ ERROR: app.py not found!
+    echo ✓ Current directory: %CD%
+    echo ✓ App file path: %CD%\app.py
     echo.
+) else (
+    echo ❌ CRITICAL ERROR: app.py not found!
+    echo.
+    echo Expected location: %CD%\app.py
     echo Current directory: %CD%
     echo.
-    echo Files in this directory:
+    echo Python files in current directory:
     dir /b *.py 2>nul
     if errorlevel 1 (
-        echo    ^(No Python files found^)
+        echo    ^(No Python files found - directory is empty^)
     )
+    echo.
+    echo ❌ SOLUTION: Make sure app.py is in the same folder as this batch file
+    echo.
+    echo How to fix:
+    echo   1. Check that app.py is in: %CD%
+    echo   2. Do NOT move or delete app.py
+    echo   3. Run this batch file from the same folder as app.py
     echo.
     pause
     exit /b 1
@@ -185,12 +202,28 @@ echo Press any key to launch the application...
 pause >nul
 
 REM ============================================================
+REM Final Verification Before Launch
+REM ============================================================
+echo [Pre-Launch Check] Final verification...
+if not exist "app.py" (
+    echo ❌ FATAL ERROR: app.py disappeared!
+    echo Location checked: %CD%\app.py
+    pause
+    exit /b 1
+)
+echo ✓ app.py verified and ready to launch
+echo.
+
+REM ============================================================
 REM Launch Streamlit Application
 REM ============================================================
 cls
 echo ════════════════════════════════════════════════════════
 echo   CUSTOMER PRICE MANAGER IS NOW RUNNING
 echo ════════════════════════════════════════════════════════
+echo.
+echo   ✓ Application File: %CD%\app.py
+echo   ✓ Working Directory: %CD%
 echo.
 echo   Browser should open automatically...
 echo   If not, open: http://localhost:8501
@@ -202,6 +235,19 @@ echo ═════════════════════════
 echo.
 
 python -m streamlit run app.py
+
+if errorlevel 1 (
+    echo.
+    echo ❌ ERROR: Streamlit failed to run!
+    echo.
+    echo Possible causes:
+    echo   1. app.py has a Python syntax error
+    echo   2. A required package is missing
+    echo   3. app.py was deleted or moved
+    echo.
+    echo Try running: python app.py
+    echo.
+)
 
 REM ============================================================
 REM Cleanup and Exit Message
