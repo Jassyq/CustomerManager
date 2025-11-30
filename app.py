@@ -7,16 +7,17 @@ import os
 from datetime import datetime
 import re
 import io
+from difflib import SequenceMatcher
 
 # Page configuration
 st.set_page_config(
     page_title="Customer Price Manager Pro",
-    page_icon="🛒",
+    page_icon="💰",
     layout="wide"
 )
 
 # Title and description
-st.title("🛒 Customer Price Manager Pro")
+st.title("💰 Customer Price Manager Pro")
 st.markdown("---")
 
 # Initialize session state
@@ -29,19 +30,37 @@ if 'customers' not in st.session_state:
 if 'products' not in st.session_state:
     st.session_state.products = {}
 if 'customer_row_map' not in st.session_state:
-    st.session_state.customer_row_map = {}  # Maps customer name to their data
-# Store ALL edits in memory
+    st.session_state.customer_row_map = {}
 if 'customer_edits' not in st.session_state:
-    st.session_state.customer_edits = {}  # Format: {customer_name: {items: [...], custom_prices: {...}}}
+    st.session_state.customer_edits = {}
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 
-def find_marker_row(ws, marker_text):
-    """Find the row number containing the marker text"""
+def similarity(a, b):
+    """Calculate string similarity ratio (0.0 to 1.0)"""
+    return SequenceMatcher(None, a, b).ratio()
+
+def find_customer_section_start(ws):
+    """Find the row where customer data starts (header row with 序号, 姓名, etc)"""
     for row_idx in range(1, ws.max_row + 1):
-        for col_idx in range(1, ws.max_column + 1):
-            cell_value = ws.cell(row_idx, col_idx).value
-            if cell_value and isinstance(cell_value, str) and marker_text in cell_value:
+        cell1 = ws.cell(row_idx, 1).value
+        cell2 = ws.cell(row_idx, 2).value
+        
+        # Look for the header row: 序号, 姓名, 内容, etc
+        if cell1 and cell2:
+            if str(cell1).strip() == '序号' and str(cell2).strip() == '姓名':
+                return row_idx
+    return None
+
+def find_product_section_start(ws):
+    """Find the row where product data starts (header row with 商品, 单价, etc)"""
+    for row_idx in range(1, ws.max_row + 1):
+        cell1 = ws.cell(row_idx, 1).value
+        cell2 = ws.cell(row_idx, 2).value
+        
+        # Look for the header row: 商品, 单价, 数量, 金额
+        if cell1 and cell2:
+            if str(cell1).strip() == '商品' and str(cell2).strip() == '单价':
                 return row_idx
     return None
 
@@ -52,114 +71,279 @@ def load_excel_data(file_bytes):
         wb = load_workbook(io.BytesIO(file_bytes))
         ws = wb.active
         
-        # Find marker rows
-        customer_marker_row = find_marker_row(ws, "报名名单")
-        product_marker_row = find_marker_row(ws, "商品汇总")
+        # Find section headers
+        customer_header_row = find_customer_section_start(ws)
+        product_header_row = find_product_section_start(ws)
         
-        if not customer_marker_row:
-            st.error("❌ Cannot find customer list marker (报名名单) in the Excel file!")
+        if not customer_header_row:
+            st.error("❌ Cannot find customer list header row!")
+            st.info("Expected to find a row with '序号' and '姓名' columns")
             return None, None, None
         
-        if not product_marker_row:
-            st.error("❌ Cannot find product summary marker (商品汇总) in the Excel file!")
+        if not product_header_row:
+            st.error("❌ Cannot find product list header row!")
+            st.info("Expected to find a row with '商品' and '单价' columns")
             return None, None, None
         
-        # Customer data starts at the row after marker (header row)
-        customer_header_row = customer_marker_row + 1
+        # Customer data starts after header
         customer_data_start_row = customer_header_row + 1
         
-        # Product data starts at the row after marker (header row)
-        product_header_row = product_marker_row + 1
+        # Product data starts after header
         product_data_start_row = product_header_row + 1
         
         # Extract customers
         customers = []
         customer_row_map = {}
         row_idx = customer_data_start_row
-        while row_idx < product_marker_row:  # Stop before product section
+        
+        while row_idx < product_header_row:  # Stop before product section
             seq_num = ws.cell(row_idx, 1).value
             name = ws.cell(row_idx, 2).value
             content = ws.cell(row_idx, 3).value
             phone = ws.cell(row_idx, 5).value
             address = ws.cell(row_idx, 6).value
             
-            # Stop if we hit an empty row or invalid sequence number
+            # Stop if we hit an empty sequence number or name
             if seq_num is None or name is None:
                 break
             
+            # Convert to strings and clean
+            name_str = str(name).strip()
+            content_str = str(content).strip() if content else ""
+            
             customer_data = {
                 'seq': seq_num,
-                'name': name,
-                'content': content,
+                'name': name_str,
+                'content': content_str,
                 'phone': phone,
                 'address': address
             }
             
             customers.append(customer_data)
-            customer_row_map[name] = customer_data
+            customer_row_map[name_str] = customer_data
             row_idx += 1
         
         # Extract products with prices
         products = {}
         row_idx = product_data_start_row
+        
         while row_idx <= ws.max_row:
             product_name = ws.cell(row_idx, 1).value
             price = ws.cell(row_idx, 2).value
             
             if product_name is None or price is None:
-                break
+                # Check if we've hit the end (empty rows)
+                if row_idx > product_data_start_row + 100:  # Safety check
+                    break
+                row_idx += 1
+                continue
             
-            products[product_name] = {
-                'price': float(price) if price else 0.0
-            }
+            try:
+                price_float = float(price) if price else 0.0
+            except (ValueError, TypeError):
+                price_float = 0.0
+            
+            product_name_str = str(product_name).strip()
+            
+            # Skip empty products
+            if product_name_str:
+                products[product_name_str] = {
+                    'price': price_float
+                }
+            
             row_idx += 1
         
         return customers, products, customer_row_map
         
     except Exception as e:
         st.error(f"❌ Error loading file: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None, None, None
 
 def parse_customer_items(content_text):
-    """Parse the customer's content field to extract items and quantities"""
+    """Parse the customer's content field to extract items and quantities
+    
+    Looks for pattern: item_name x quantity
+    Separators can be comma or Chinese comma（，）
+    """
     if not content_text:
         return []
     
     items = []
-    pattern = r'(.+?)x(\d+)(?:\s*[,、]|\s*，|$)'
+    
+    # Pattern: Match text up to "x[digits]" followed by comma or end
+    # This properly handles Chinese commas inside item names
+    pattern = r'(.*?)\s*x\s*(\d+)\s*(?:，|,|$)'
     matches = re.finditer(pattern, content_text)
     
     for match in matches:
         item_name = match.group(1).strip()
-        item_name = item_name.strip(',，、 ').strip()
         qty_str = match.group(2)
         
+        # Clean up the item name - remove only leading/trailing separators, not parentheses
+        # This preserves closing parentheses like ） at the end of product names
+        item_name = re.sub(r'^[\s,，。；]+', '', item_name)
+        item_name = re.sub(r'[\s,，。；]+$', '', item_name)
+        
+        # Skip empty or invalid items
+        if not item_name:
+            continue
+        
         # Skip if this is the total price line
-        if '总价' in item_name or '總價' in item_name:
+        if '总价' in item_name:  # ✅ CORRECT CHINESE!
             continue
         
         try:
             qty = int(qty_str)
-            if item_name:
-                items.append({'name': item_name, 'qty': qty})
+            items.append({'name': item_name, 'qty': qty})
         except ValueError:
             continue
     
     return items
 
-def get_item_price(customer_name, item_name):
-    """Get the price for an item, checking custom prices first"""
+def get_item_price(customer_name, item_name, fuzzy_threshold=0.70):
+    """Get the price for an item using EXACT matching first, then FUZZY matching."""
+    
+    # *** DEBUG: Show what we're looking for ***
+    #st.write(f"DEBUG: Looking for '{item_name}'")
+    #st.write(f"DEBUG: In products dict? {item_name in st.session_state.products}")
+    
     # Check if there's a custom price for this customer and item
     if customer_name in st.session_state.customer_edits:
         if 'custom_prices' in st.session_state.customer_edits[customer_name]:
             if item_name in st.session_state.customer_edits[customer_name]['custom_prices']:
                 return st.session_state.customer_edits[customer_name]['custom_prices'][item_name]
     
-    # Otherwise return the base price
+    # Try EXACT match in product list (fastest)
     if item_name in st.session_state.products:
-        return st.session_state.products[item_name]['price']
+        price = st.session_state.products[item_name]['price']
+        #st.write(f"DEBUG: EXACT MATCH found! Price: {price}")
+        return price
     
+    st.write(f"DEBUG: No exact match, trying fuzzy...")
+    
+    # Try FUZZY match to handle truncated text
+    best_match = None
+    best_score = 0
+    
+    for product_name in st.session_state.products.keys():
+        score = similarity(item_name, product_name)
+        if score > best_score:
+            best_score = score
+            best_match = product_name
+    
+    # Return fuzzy match if above threshold
+    if best_score >= fuzzy_threshold and best_match:
+        return st.session_state.products[best_match]['price']
+    
+    # Try keyword-based matching as last resort
+    item_words = set(item_name.split())
+    best_keyword_match = None
+    best_keyword_count = 0
+    
+    for product_name in st.session_state.products.keys():
+        product_words = set(product_name.split())
+        shared_words = item_words & product_words
+        
+        if len(shared_words) > best_keyword_count:
+            best_keyword_count = len(shared_words)
+            best_keyword_match = product_name
+    
+    # If we found a keyword match with at least 2 shared words, use it
+    if best_keyword_match and best_keyword_count >= 2:
+        return st.session_state.products[best_keyword_match]['price']
+    
+    # Not found - return 0.0
     return 0.0
+
+def debug_item_lookup(item_name):
+    """Debug function to show why a price lookup fails."""
+    # Check exact match
+    if item_name in st.session_state.products:
+        price = st.session_state.products[item_name]['price']
+        return {
+            'found': True,
+            'type': 'exact',
+            'price': price,
+            'message': f'✅ EXACT MATCH in product list: ${price:.2f}'
+        }
+    
+    # Try fuzzy match
+    best_match = None
+    best_score = 0
+    
+    for product_name in st.session_state.products.keys():
+        score = similarity(item_name, product_name)
+        if score > best_score:
+            best_score = score
+            best_match = product_name
+    
+    # Check if fuzzy match is good (70% threshold)
+    if best_score >= 0.70:
+        price = st.session_state.products[best_match]['price']
+        return {
+            'found': True,
+            'type': 'fuzzy',
+            'price': price,
+            'score': best_score,
+            'matched_name': best_match,
+            'message': f'✅ FUZZY MATCH (similarity: {best_score:.1%}): ${price:.2f}'
+        }
+    
+    # Try keyword matching
+    item_words = set(item_name.split())
+    best_keyword_match = None
+    best_keyword_count = 0
+    
+    for product_name in st.session_state.products.keys():
+        product_words = set(product_name.split())
+        shared_words = item_words & product_words
+        
+        if len(shared_words) > best_keyword_count:
+            best_keyword_count = len(shared_words)
+            best_keyword_match = product_name
+    
+    # Return keyword match if found
+    if best_keyword_match and best_keyword_count >= 2:
+        price = st.session_state.products[best_keyword_match]['price']
+        return {
+            'found': True,
+            'type': 'keyword',
+            'price': price,
+            'keyword_count': best_keyword_count,
+            'matched_name': best_keyword_match,
+            'message': f'✅ KEYWORD MATCH ({best_keyword_count} shared words): ${price:.2f}'
+        }
+    
+    # Not found - find similar products
+    similar_products = []
+    
+    item_words = set(item_name.split())
+    
+    for product_name in st.session_state.products.keys():
+        product_words = set(product_name.split())
+        shared_words = item_words & product_words
+        
+        if len(shared_words) >= 1:
+            similar_products.append({
+                'name': product_name,
+                'price': st.session_state.products[product_name]['price'],
+                'match_words': len(shared_words),
+                'total_words': len(product_words)
+            })
+    
+    # Sort by most similar
+    similar_products.sort(key=lambda x: x['match_words'], reverse=True)
+    
+    return {
+        'found': False,
+        'type': 'not_found',
+        'price': 0.0,
+        'message': f'❌ NO MATCH in product list',
+        'searched_for': item_name,
+        'similar': similar_products[:3]
+    }
 
 def calculate_total(items, customer_name=None):
     """Calculate total price for items"""
@@ -222,7 +406,7 @@ def create_export_excel():
     ws.column_dimensions['F'].width = 30  # Address
     
     # Create header row
-    headers = ['序号', '客户名称', '订购商品明细', '总价', '联系电话', '地址']
+    headers = ['序号', '姓名', '商品内容及数量', '总金额', '手机号码', '收货地址']
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx)
         cell.value = header
@@ -309,9 +493,9 @@ if st.session_state.data_loaded:
     
     # Export button at the top
     st.sidebar.markdown("---")
-    st.sidebar.header("📤 Export")
+    st.sidebar.header("📥 Export")
     
-    export_button = st.sidebar.button("📥 Export Clean Excel", use_container_width=True, type="primary")
+    export_button = st.sidebar.button("📄 Export Clean Excel", use_container_width=True, type="primary")
     
     if export_button:
         with st.spinner("Creating export file..."):
@@ -331,7 +515,7 @@ if st.session_state.data_loaded:
     # Show stats
     total_customers = len(st.session_state.customers)
     edited_customers = len(st.session_state.customer_edits)
-    st.sidebar.info(f"📊 Total customers: {total_customers}\n✏️ Edited: {edited_customers}")
+    st.sidebar.info(f"👥 Total customers: {total_customers}\n✏️ Edited: {edited_customers}")
     
     # Customer selection
     st.sidebar.markdown("---")
@@ -354,7 +538,7 @@ if st.session_state.data_loaded:
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("📋 Customer Information")
+        st.subheader("👤 Customer Information")
         st.write(f"**Name:** {customer_name}")
         st.write(f"**Phone:** {selected_customer['phone']}")
         st.write(f"**Address:** {selected_customer['address']}")
@@ -371,6 +555,57 @@ if st.session_state.data_loaded:
         st.metric("Total Price", f"${total:.2f}")
         if has_edits:
             st.success("✅ Changes saved in memory")
+    
+    st.markdown("---")
+    
+    # Price Lookup Verification Section
+    st.subheader("💰 Price Lookup Verification")
+    
+    with st.expander("Click to verify how items are being priced (with FUZZY MATCHING)"):
+        current_items = get_current_items(customer_name)
+        
+        if current_items:
+            st.write("**Checking each item against the product price table...**\n")
+            st.info("📝 Using FUZZY MATCHING to handle truncated or similar product names!")
+            
+            issues_found = []
+            
+            for item in current_items:
+                lookup_result = debug_item_lookup(item['name'])
+                
+                if lookup_result['found']:
+                    if lookup_result['type'] == 'exact':
+                        st.success(
+                            f"✅ **{item['name']}**\n"
+                            f"Price: ${lookup_result['price']:.2f} (Qty: {item['qty']}) - EXACT MATCH"
+                        )
+                    else:  # fuzzy or keyword
+                        st.success(
+                            f"✅ **{item['name']}**\n"
+                            f"Price: ${lookup_result['price']:.2f} (Qty: {item['qty']})\n"
+                            f"Matched to: '{lookup_result['matched_name']}' - {lookup_result['type'].upper()} MATCH"
+                        )
+                else:
+                    st.error(
+                        f"❌ **{item['name']}**\n"
+                        f"No match found in product list"
+                    )
+                    issues_found.append(item['name'])
+                    
+                    # Show similar products if any
+                    if lookup_result['similar']:
+                        st.warning("Similar products in the list:")
+                        for similar in lookup_result['similar']:
+                            st.write(f"  • {similar['name']} (${similar['price']:.2f})")
+            
+            if issues_found:
+                st.error(f"\n⚠️ Found {len(issues_found)} item(s) with no match in product list!")
+                st.write("These items will show $0.00 price. To fix:")
+                st.write("1. Check the product name spelling in the product list")
+                st.write("2. Update the product list to include the missing items")
+                st.write("3. Or use custom prices to manually set these prices")
+            else:
+                st.success("✅ All items matched successfully to the product price table!")
     
     st.markdown("---")
     
@@ -423,7 +658,7 @@ if st.session_state.data_loaded:
                     value=float(current_price),
                     step=0.01,
                     format="%.2f",
-                    key=f"price_{idx}",
+                    key=f"price_{customer_name}_{idx}",
                     label_visibility="collapsed"
                 )
                 
@@ -436,7 +671,7 @@ if st.session_state.data_loaded:
                     min_value=0,
                     value=item['qty'],
                     step=1,
-                    key=f"qty_{idx}",
+                    key=f"qty_{customer_name}_{idx}",
                     label_visibility="collapsed"
                 )
             
@@ -446,7 +681,7 @@ if st.session_state.data_loaded:
                 st.text(f"${subtotal:.2f}")
             
             with col5:
-                delete = st.checkbox("Del", key=f"del_{idx}", label_visibility="collapsed")
+                delete = st.checkbox("Del", key=f"del_{customer_name}_{idx}", label_visibility="collapsed")
                 if delete:
                     items_to_delete.append(idx)
             
@@ -491,28 +726,19 @@ if st.session_state.data_loaded:
         current_custom_prices.update(custom_price_updates)
         
         # Calculate new total
-        new_total = calculate_total(edited_items, customer_name)
-        
-        # Temporarily store custom prices for calculation
-        if custom_price_updates:
-            temp_edits = st.session_state.customer_edits.get(customer_name, {})
-            temp_custom = temp_edits.get('custom_prices', {}).copy()
-            temp_custom.update(custom_price_updates)
-            
-            # Recalculate with new prices
-            new_total = 0.0
-            for item in edited_items:
-                if item['name'] in temp_custom:
-                    price = temp_custom[item['name']]
-                else:
-                    price = st.session_state.products.get(item['name'], {}).get('price', 0.0)
-                new_total += price * item['qty']
+        new_total = 0.0
+        for item in edited_items:
+            if item['name'] in current_custom_prices:
+                price = current_custom_prices[item['name']]
+            else:
+                price = st.session_state.products.get(item['name'], {}).get('price', 0.0)
+            new_total += price * item['qty']
         
         st.markdown(f"### **New Total: ${new_total:.2f}**")
         
         # Show custom prices if any
         if custom_price_updates:
-            with st.expander("🏷️ Custom Prices for This Customer"):
+            with st.expander("🛠️ Custom Prices for This Customer"):
                 for prod, price in custom_price_updates.items():
                     base_price = st.session_state.products.get(prod, {}).get('price', 0.0)
                     diff = price - base_price
@@ -541,15 +767,16 @@ if st.session_state.data_loaded:
 
 else:
     # Welcome screen
-    st.info("👈 Please upload an Excel file to get started")
+    st.info("📤 Please upload an Excel file to get started")
     
     st.markdown("""
-    ### 🎯 How This Works:
+    ### 🎯 How This Works (IMPROVED v6.0):
     
-    **NO FILE PERMISSION ISSUES!**
-    - All changes stored in app memory
-    - Survives page refresh and reconnection
-    - No need to write to original file
+    **NEW: PROPER CHINESE CHARACTER SUPPORT!**
+    - Correctly detects section headers (序号, 姓名, 商品, 单价)
+    - Handles full Chinese product names
+    - Supports both Chinese and English customer names
+    - FUZZY MATCHING for product name variations
     
     **Workflow:**
     1. **Upload** your Excel file (read-only, no permissions needed)
@@ -563,25 +790,41 @@ else:
     - ✅ Changes persist in memory (even on refresh!)
     - ✅ Edit quantities and prices per customer
     - ✅ Add/delete items
-    - ✅ **Export to clean Excel format**
+    - ✅ **FUZZY MATCHING** for product name variations
+    - ✅ Exact matching for complete text
+    - ✅ Price verification tool with match types
+    - ✅ Export to clean Excel format
     - ✅ Professional formatting in export
     
-    ### 📤 Export Format:
+    ### 💰 Price Matching (IMPROVED):
     
-    Clean Excel with columns:
-    - 序号 (Sequence)
-    - 客户名称 (Customer Name)
-    - 订购商品明细 (Items Detail with prices)
-    - 总价 (Total Price)
-    - 联系电话 (Phone)
-    - 地址 (Address)
+    When editing a customer:
+    1. Expand "Price Lookup Verification" section
+    2. See ✅ with match type (EXACT, FUZZY, or KEYWORD)
+    3. See ❌ for items NOT in product list
+    4. Similarity score shown for fuzzy matches
     
-    ### 📋 Requirements:
+    **How Matching Works:**
+    1. **EXACT MATCH**: Item name exactly matches product list
+    2. **FUZZY MATCH**: Item name is 70%+ similar to product (handles variations)
+    3. **KEYWORD MATCH**: Shares 2+ keywords with product
+    4. **NOT FOUND**: Not in product list - shows similar options
     
-    - Excel file must have "报名名单" (customer list) section
-    - Excel file must have "商品汇总" (product summary) section
+    ### 📊 Required File Format:
+    
+    Your Excel file must have:
+    - A header row with "序号" and "姓名" (customer list marker)
+    - Followed by customer data rows
+    - A header row with "商品" and "单价" (product list marker)
+    - Followed by product data rows with: Product Name | Price
+    
+    **Your file structure:**
+    - Row 4: Header (序号, 姓名, 内容, 标签, 手机号码, 收货地址)
+    - Rows 5+: Customer data
+    - Row 40: Product header (商品, 单价, 数量, 金额)
+    - Rows 41+: Product data (商品名, 价格)
     """)
 
 # Footer
 st.markdown("---")
-st.caption("Customer Price Manager Pro v4.0 | Memory-Based + Clean Export | Made with ❤️ using Streamlit")
+st.caption("Customer Price Manager Pro v6.0 | Proper Chinese Character Support | Made with ❤️ using Streamlit")
