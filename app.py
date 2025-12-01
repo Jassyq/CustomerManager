@@ -428,7 +428,7 @@ def create_export_excel():
         for item in items:
             price = get_item_price(customer_name, item['name'])
             subtotal = price * item['qty']
-            items_detail.append(f"{item['name']} x{item['qty']} (@${price:.2f} = ${subtotal:.2f})")
+            items_detail.append(f"{item['name']} x{item['qty']} (${subtotal:.2f})")
         
         items_text = '\n'.join(items_detail)
         
