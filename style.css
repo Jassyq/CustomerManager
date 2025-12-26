@@ -1,0 +1,52 @@
+/* ============================================
+   SPACING & LAYOUT
+   ============================================ */
+
+/* Reduce padding around main content area */
+.block-container {
+    padding-top: 2rem ;
+    padding-bottom: 0 rem ;
+}
+
+/* Reduce spacing between all elements */
+.element-container {
+    margin-bottom: 0.1rem;
+    padding-bottom: 0;
+}
+
+/* Reduce gap between vertically stacked elements */
+[data-testid="stVerticalBlock"] > div {
+    gap: 0.1rem;
+}
+
+
+
+/* ============================================
+   HORIZONTAL DIVIDERS (---)
+   ============================================ */
+
+/* Reduce spacing around dividers */
+hr {
+    margin: 0.5rem 0;
+    padding: 0;
+}
+
+/* Target dividers inside markdown containers */
+[data-testid="stMarkdownContainer"] {
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+/* ============================================
+   CURRENT TOTAL - CUSTOM STYLING
+   ============================================ */
+
+/* Style the current total amount */
+.current-total-amount {
+    font-size: 48px;
+    font-weight: bold;
+    color: #1f77b4;
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}

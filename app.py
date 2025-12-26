@@ -11,14 +11,21 @@ from difflib import SequenceMatcher
 
 # Page configuration
 st.set_page_config(
-    page_title="Customer Price Manager Pro",
-    page_icon="💰",
+    page_title="Price Manager",
     layout="wide"
 )
 
 # Title and description
-st.title("💰 Customer Price Manager Pro")
+st.title("Customer Price Manager")
 st.markdown("---")
+
+#styling
+try:
+    with open('style.css') as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+except FileNotFoundError:
+    st.warning("CSS file not found - using default styling")
+
 
 # Initialize session state
 if 'original_file_bytes' not in st.session_state:
@@ -486,7 +493,6 @@ if uploaded_file is not None:
                 st.session_state.customer_row_map = customer_row_map
                 st.session_state.data_loaded = True
                 st.session_state.customer_edits = {}  # Reset edits on new file
-                st.sidebar.success(f"✅ Loaded {len(customers)} customers and {len(products)} products")
 
 # Main content
 if st.session_state.data_loaded:
@@ -536,49 +542,32 @@ if st.session_state.data_loaded:
     # Check if customer has been edited
     has_edits = customer_name in st.session_state.customer_edits
     
-    # Add Grand Total at top (LEFT SIDE)
-    col_total, col_info = st.columns([1, 2])
-    
-    with col_total:
-        # Calculate grand total for ALL customers
-        grand_total = 0.0
-        for customer in st.session_state.customers:
-            cust_name = customer['name']
-            items = get_current_items(cust_name)
-            customer_total = calculate_total(items, cust_name)
-            grand_total += customer_total
+    # Grand Total
+    grand_total = 0.0
+    for customer in st.session_state.customers:
+        cust_name = customer['name']
+        items = get_current_items(cust_name)
+        customer_total = calculate_total(items, cust_name)
+        grand_total += customer_total
         
-        # Display grand total with styling (LEFT ALIGNED)
-        st.markdown("### 📊 Grand Total")
-        st.markdown(f"<h1 style='text-align: left; color: #1f77b4; margin: 0;'>${grand_total:,.2f}</h1>", unsafe_allow_html=True)
-        st.caption(f"All {len(st.session_state.customers)} customers")
-    
-    with col_info:
-        st.info(f"📊 Loaded {len(st.session_state.customers)} customers and {len(st.session_state.products)} products")
-    
+    #display grand total
+    st.markdown(f"<p style='font-size: 24px;'><strong>📊 Grand Total: ${grand_total:,.2f}</strong> </p>", unsafe_allow_html=True)
+    st.caption(f"{len(st.session_state.customers)} customers total")
     st.markdown("---")
     
     # Display customer information
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("👤 Customer Information")
-        st.write(f"**Name:** {customer_name}")
-        st.write(f"**Phone:** {selected_customer['phone']}")
-        st.write(f"**Address:** {selected_customer['address']}")
-        if has_edits:
-            last_modified = st.session_state.customer_edits[customer_name].get('last_modified')
-            if last_modified:
-                st.info(f"✏️ Last edited: {last_modified.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    with col2:
-        # Placeholder for dynamic total (will be populated during edit section)
-        dynamic_total_placeholder = st.empty()
+    st.subheader("👤 Customer Information")
+    st.write(f"**Name:** {customer_name}" f",  **Phone:** {selected_customer['phone']}")
+    st.write(f"**Address:** {selected_customer['address']}")
+    if has_edits:
+        last_modified = st.session_state.customer_edits[customer_name].get('last_modified')
+        if last_modified:
+            st.info(f"✏️ Last edited: {last_modified.strftime('%Y-%m-%d %H:%M:%S')}")
     
     st.markdown("---")
     
     # Edit items section
-    st.subheader("✏️ Edit Order Items & Prices (⚡ DYNAMIC UPDATES)")
+    st.subheader("✏️ Edit Order Items & Prices")
     
     # Get current items
     current_items = get_current_items(customer_name)
@@ -605,15 +594,20 @@ if st.session_state.data_loaded:
         st.write("**Del**")
     
     edited_items = []
-    items_to_delete = []
     custom_price_updates = {}
     
     # Display existing items with DYNAMIC PRICING
     dynamic_total = 0.0
     
     for idx, item in enumerate(current_items):
+        # Use item name in key to make it unique per item (prevents inheritance bug)
+        item_key = f"{customer_name}_{item['name'].replace(' ', '_')}_{idx}"
+
         col1, col2, col3, col4, col5 = st.columns([3, 1.2, 1, 1.2, 1])
-        
+
+        # Check delete status first
+        delete = st.session_state.get(f"del_{item_key}", False)
+
         with col1:
             st.text(item['name'])
         
@@ -626,7 +620,7 @@ if st.session_state.data_loaded:
                 value=float(current_price),
                 step=0.01,
                 format="%.2f",
-                key=f"price_{customer_name}_{idx}",
+                key=f"price_{item_key}",
                 label_visibility="collapsed"
             )
             
@@ -639,78 +633,87 @@ if st.session_state.data_loaded:
                 min_value=0,
                 value=item['qty'],
                 step=1,
-                key=f"qty_{customer_name}_{idx}",
+                key=f"qty_{item_key}",
                 label_visibility="collapsed"
             )
         
         with col4:
-            price_to_use = new_price
-            subtotal = price_to_use * new_qty
-            st.text(f"${subtotal:.2f}")
-            dynamic_total += subtotal
+            if not delete and new_qty > 0:
+                price_to_use = new_price
+                subtotal = price_to_use * new_qty
+                st.text(f"${subtotal:.2f}")
+                dynamic_total += subtotal
+            else:
+                st.text("--")
         
         with col5:
-            delete = st.checkbox("Del", key=f"del_{customer_name}_{idx}", label_visibility="collapsed")
-            if delete:
-                items_to_delete.append(idx)
+            st.checkbox("Del", key=f"del_{item_key}", label_visibility="collapsed")
         
-        if new_qty > 0 and idx not in items_to_delete:
+        # Only add to edited_items if not deleted and quantity > 0
+        if not delete and new_qty > 0:
             edited_items.append({'name': item['name'], 'qty': new_qty})
     
     st.markdown("---")
+
+    #adding items and current total
+    col_addItem, col_currentTotal = st.columns([2.5, 2])
+
+    with col_addItem:
+        searchBar, quantityBar = st.columns([2.8, 0.7])
+        
+        with searchBar:
+            # Search/Select box - dynamically filters as you type
+            available_products = list(st.session_state.products.keys())
+        
+            # Get current search term from session state to maintain filtering
+            if 'search_filter' not in st.session_state:
+                st.session_state.search_filter = ""
+            
+            new_item = st.selectbox(
+                "Select Product",
+                [""] + available_products,
+                key="new_item_select",
+            )
     
-    # Add new item section
-    st.write("**Add New Item:**")
-    col1, col2, col3 = st.columns([2.5, 1, 1])
-    
-    with col1:
-        available_products = list(st.session_state.products.keys())
-        new_item = st.selectbox(
-            "Select Product",
-            [""] + available_products,
-            key="new_item_select"
-        )
-    
-    with col2:
-        new_item_qty = st.number_input(
-            "Quantity",
-            min_value=0,
-            value=0,
-            step=1,
-            key="new_item_qty"
-        )
-    
-    with col3:
+        with quantityBar:
+            new_item_qty = st.number_input(
+                "Quantity",
+                min_value=1,
+                value=1,
+                step=1,
+                key="new_item_qty"
+            )
+        # Subtotal display (below the selection row)
         if new_item:
             new_item_price = st.session_state.products.get(new_item, {}).get('price', 0.0)
             new_item_subtotal = new_item_price * new_item_qty
-            st.metric("Subtotal", f"${new_item_subtotal:.2f}")
-            dynamic_total += new_item_subtotal
-    
-    if new_item and new_item_qty > 0:
-        existing = False
-        for item in edited_items:
-            if item['name'] == new_item:
-                item['qty'] += new_item_qty
-                existing = True
-                break
-        
-        if not existing:
-            edited_items.append({'name': new_item, 'qty': new_item_qty})
-    
-    # Update the dynamic total placeholder (shows in Order Summary location)
-    with dynamic_total_placeholder.container():
-        st.markdown("### 💵 Current Total")
-        st.markdown(f"<h1 style='color: #1f77b4; margin: 0;'>${dynamic_total:,.2f}</h1>", unsafe_allow_html=True)
-        st.caption("⚡ Updates in real-time!")
+            st.markdown(f"Subtotal: ${new_item_subtotal:.2f}")
+            st.metric("New Total", f"${dynamic_total + new_item_subtotal:.2f}")
+            
+            
+        # Add to edited items
+        if new_item and new_item_qty > 0:
+            existing = False
+            for item in edited_items:
+                if item['name'] == new_item:
+                    item['qty'] += new_item_qty
+                    existing = True
+                    break
+                
+            if not existing:
+                    edited_items.append({'name': new_item, 'qty': new_item_qty})
+
+    with col_currentTotal:
+        st.markdown("## 💵 Current Total:")
+        st.markdown(f"<p class='current-total-amount'>${dynamic_total:,.2f}</p>", unsafe_allow_html=True)
         st.metric("Total Items", len([item for item in edited_items if item['qty'] > 0]))
         if has_edits:
             st.success("✅ Changes saved in memory")
-    
-    # Update custom prices
+
+    # Update custom prices (outside columns)
     current_custom_prices.update(custom_price_updates)
-    
-    # Show custom prices if any
+
+    # Show custom prices if any (outside columns, below everything)
     if custom_price_updates:
         with st.expander("🛠️ Custom Prices for This Customer"):
             for prod, price in custom_price_updates.items():
@@ -720,22 +723,21 @@ if st.session_state.data_loaded:
                     st.write(f"**{prod}**: ${base_price:.2f} → ${price:.2f} (+${diff:.2f})")
                 elif diff < 0:
                     st.write(f"**{prod}**: ${base_price:.2f} → ${price:.2f} (${diff:.2f})")
-    
+        
     st.markdown("---")
     
+
     # Submit button
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2 = st.columns([3, 1])  # Left column is wider (empty space)
     with col1:
-        if st.button("💾 Save to Memory", use_container_width=True, type="primary"):
+        pass  # Empty - creates space on the left
+        
+    with col2:
+        if st.button("💾 Save", use_container_width=True, type="primary"):
             # Save edits to session state
             save_customer_edits(customer_name, edited_items, current_custom_prices)
-            st.success("✅ Changes saved to memory! (Will persist even if you refresh)")
+            st.success("✅ Changes saved to memory!")
             st.info("💡 Click 'Export Clean Excel' in sidebar when all edits are done")
-            st.rerun()
-    
-    with col2:
-        if st.button("❌ Cancel", use_container_width=True):
-            st.info("Changes discarded")
             st.rerun()
 
 else:
@@ -743,46 +745,14 @@ else:
     st.info("📤 Please upload an Excel file to get started")
     
     st.markdown("""
-    ### 🎯 How This Works (IMPROVED v6.0):
-    
-    **NEW: PROPER CHINESE CHARACTER SUPPORT!**
-    - Correctly detects section headers (序号, 姓名, 商品, 单价)
-    - Handles full Chinese product names
-    - Supports both Chinese and English customer names
-    - FUZZY MATCHING for product name variations
+    ### Upload a file by clicking the button to the left:
     
     **Workflow:**
-    1. **Upload** your Excel file (read-only, no permissions needed)
+    1. **Upload** your Excel file 
     2. **Edit** customers one by one
-    3. **Save to Memory** after each customer (changes persist!)
+    3. **Save to Memory** after each customer 
     4. **Export** when done - creates clean, formatted Excel
-    
-    ### ✨ Key Features:
-    
-    - ✅ No file permission errors
-    - ✅ Changes persist in memory (even on refresh!)
-    - ✅ Edit quantities and prices per customer
-    - ✅ Add/delete items
-    - ✅ **FUZZY MATCHING** for product name variations
-    - ✅ Exact matching for complete text
-    - ✅ Price verification tool with match types
-    - ✅ Export to clean Excel format
-    - ✅ Professional formatting in export
-    
-    ### 💰 Price Matching (IMPROVED):
-    
-    When editing a customer:
-    1. Expand "Price Lookup Verification" section
-    2. See ✅ with match type (EXACT, FUZZY, or KEYWORD)
-    3. See ❌ for items NOT in product list
-    4. Similarity score shown for fuzzy matches
-    
-    **How Matching Works:**
-    1. **EXACT MATCH**: Item name exactly matches product list
-    2. **FUZZY MATCH**: Item name is 70%+ similar to product (handles variations)
-    3. **KEYWORD MATCH**: Shares 2+ keywords with product
-    4. **NOT FOUND**: Not in product list - shows similar options
-    
+
     ### 📊 Required File Format:
     
     Your Excel file must have:
@@ -799,5 +769,4 @@ else:
     """)
 
 # Footer
-st.markdown("---")
-st.caption("Customer Price Manager Pro v7.0 | Grand Total + Dynamic Pricing | Made with ❤️ using Streamlit")
+st.caption("version 1.7.0")
