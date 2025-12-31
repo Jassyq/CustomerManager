@@ -672,16 +672,16 @@ if st.session_state.data_loaded:
             new_item = st.selectbox(
                 "Select Product",
                 [""] + available_products,
-                key="new_item_select",
+                key=f"new_item_select_{customer_name}",
             )
     
         with quantityBar:
             new_item_qty = st.number_input(
                 "Quantity",
-                min_value=1,
-                value=1,
+                min_value=0,
+                value=0,
                 step=1,
-                key="new_item_qty"
+                key=f"new_item_qty_{customer_name}"
             )
         # Subtotal display (below the selection row)
         if new_item:
